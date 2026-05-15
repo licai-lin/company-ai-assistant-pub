@@ -1,0 +1,71 @@
+# Docker Compose creates one private network for these services.
+# Containers can call each other by service name, such as backend -> postgres.
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: company-ai-postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: company_ai
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d company_ai"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  ollama:
+    image: ollama/ollama:latest
+    container_name: company-ai-ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+
+  backend:
+    build:
+      context: ./backend
+    container_name: company-ai-backend
+    depends_on:
+      postgres:
+        condition: service_healthy
+      ollama:
+        condition: service_started
+    environment:
+      # Inside Compose, postgres is the hostname of the database container.
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/company_ai
+      # Inside Compose, ollama is the hostname of the Ollama container.
+      OLLAMA_BASE_URL: http://ollama:11434
+      # llama3.2:3b is small enough for typical Docker Desktop memory settings.
+      # If you increase Docker memory later, you can change this to llama3:8b.
+      OLLAMA_CHAT_MODEL: llama3.2:3b
+      OLLAMA_EMBEDDING_MODEL: nomic-embed-text
+      EMBEDDING_DIMENSION: 768
+      FRONTEND_URL: http://localhost:3000
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend/app:/app/app
+
+  frontend:
+    build:
+      context: ./frontend
+    container_name: company-ai-frontend
+    depends_on:
+      - backend
+    environment:
+      # The browser runs on your computer, so it reaches the backend through localhost.
+      NEXT_PUBLIC_API_BASE_URL: http://localhost:8000
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+
+volumes:
+  postgres_data:
+  ollama_data:
